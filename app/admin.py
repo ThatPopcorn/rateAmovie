@@ -4,7 +4,10 @@ import time
 from flask import Blueprint, request, jsonify
 from sqlalchemy import text
 from .extensions import db
-from .models import User
+
+# TODO:
+# - Implement stricter validation and command whitelisting for SQL execution
+# - Add a better authentication mechanism for admin access (e.g. OAuth, multi-factor auth, administrator access to accounts)
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/hidden/v1')
 
@@ -18,47 +21,20 @@ def generate_admin_token():
     print(f" Valid until: {time.ctime(admin_state['expires_at'])}\n")
     return token
 
-@admin_bp.route('/login', methods=['POST'])
-def login():
-    """Authenticate user and generate admin session token"""
-    try:
-        data = request.get_json()
-        username = data.get('username', '').strip()
-        password = data.get('password', '').strip()
-        
-        if not username or not password:
-            return jsonify({"error": "Username and password required"}), 400
-        
-        # Authenticate user against the database
-        user = User.query.filter_by(username=username).first()
-        
-        if not user or not user.check_password(password):
-            return jsonify({"error": "Invalid credentials"}), 401
-        
-        # Generate admin token
-        token = generate_admin_token()
-        expires_in = 3600  # 1 hour
-        
-        return jsonify({
-            "status": "success",
-            "message": f"Logged in as {username}",
-            "token": token,
-            "expires_in": expires_in,
-            "user_id": user.id,
-            "username": user.username
-        }), 200
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
+# Byron: This is a dangerous method, I will keep it protected and later implement
+# an actual guideline for allowed commands so someone doesnt mess up the database.
 @admin_bp.route('/exec', methods=['POST'])
 def execute_sql():
     """Execute raw SQL command (SELECT, INSERT, UPDATE, DELETE)"""
     request_token = request.headers.get('X-Admin-Auth')
     
+    # Byron: This is probably not the most secure way to handle admin auth, but it's sufficient for now
+    # as this endpoint is hidden and wont be exposed publicly. In a production environment, I will consider using
+    # a more robust authentication mechanism.
     if not admin_state["token"] or request_token != admin_state["token"]:
         return jsonify({"error": "Not Found"}), 404
     
+    # Byron: This is fine...
     if time.time() > admin_state["expires_at"]:
         return jsonify({"error": "Session expired"}), 403
 
