@@ -26,6 +26,7 @@ HTML_LAYOUT = r"""
         .movie-card { cursor: pointer; }
         .text-warning { color: #ffc107 !important; }
         .form-control, .form-select { background-color: #2b2b2b; border: 1px solid #444; color: white; border-radius: 8px; }
+        .form-control::placeholder { color: white; opacity: 1; }
         .form-control:focus, .form-select:focus { background-color: #2b2b2b; color: white; border-color: #ffc107; box-shadow: 0 0 0 0.2rem rgba(255,193,7,0.25); }
         .star-rating { font-size: 2rem; cursor: pointer; color: #444; user-select: none; }
         .star-rating .star { transition: color 0.2s; display: inline-block; }
