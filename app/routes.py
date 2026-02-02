@@ -453,8 +453,6 @@ PAGE_CREATE = HTML_LAYOUT.replace('{{ content|safe }}', r"""
     </div>
 </div>
 <script>
-    if(!requireAuth()) {}
-    
     async function submitMovie() {
         const payload = {
             title: document.getElementById('title').value.trim(),
