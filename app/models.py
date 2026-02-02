@@ -21,7 +21,12 @@ class User(db.Model):
     reviews = db.relationship('Review', backref='author', lazy=True)
 
     def set_password(self, password):
+        # test if the password is over 8 characters
+        if len(password) < 8:
+            return False
+
         self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
+        return True
 
     def check_password(self, password):
         return bcrypt.check_password_hash(self.password_hash, password)

@@ -20,7 +20,8 @@ def register():
         return jsonify({"message": "Email already exists"}), 400
 
     new_user = User(username=data.get('username'), email=data.get('email'))
-    new_user.set_password(data.get('password'))
+    if not new_user.set_password(data.get('password')):
+        return jsonify({"message": "Password strength must be greater"}), 400
 
     db.session.add(new_user)
     db.session.commit()
