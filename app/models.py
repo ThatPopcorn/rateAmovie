@@ -18,6 +18,11 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
     
+    # Profile fields
+    bio = db.Column(db.Text, nullable=True, default='')
+    profile_picture = db.Column(db.String(500), nullable=True)
+    favorite_genres = db.Column(db.String(500), nullable=True, default='')  # Comma-separated genres
+    
     reviews = db.relationship('Review', backref='author', lazy=True)
 
     def set_password(self, password):
@@ -30,6 +35,16 @@ class User(db.Model):
 
     def check_password(self, password):
         return bcrypt.check_password_hash(self.password_hash, password)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'username': self.username,
+            'email': self.email,
+            'bio': self.bio or '',
+            'profile_picture': self.profile_picture,
+            'favorite_genres': self.favorite_genres or ''
+        }
 
 class Movie(db.Model):
     __tablename__ = 'movies'
@@ -44,6 +59,10 @@ class Movie(db.Model):
     director = db.Column(db.String(100), nullable=True)
     cast = db.Column(db.Text, nullable=True)
     
+    # Track who created the movie
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    creator = db.relationship('User', backref='created_movies', lazy=True)
+    
     reviews = db.relationship('Review', backref='movie', lazy=True, cascade="all, delete-orphan")
 
     def average_rating(self):
@@ -53,6 +72,14 @@ class Movie(db.Model):
         return round(total / len(self.reviews), 1)
 
     def to_dict(self):
+        creator_info = None
+        if self.creator:
+            creator_info = {
+                'id': self.creator.id,
+                'username': self.creator.username,
+                'profile_picture': self.creator.profile_picture
+            }
+        
         return {
             'id': self.id,
             'title': self.title,
@@ -62,7 +89,9 @@ class Movie(db.Model):
             'director': self.director,
             'cast': self.cast,
             'average_rating': self.average_rating(),
-            'review_count': len(self.reviews)
+            'review_count': len(self.reviews),
+            'creator': creator_info,
+            'user_id': self.user_id
         }
 
 class Review(db.Model):
