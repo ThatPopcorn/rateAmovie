@@ -1,9 +1,12 @@
 # app/routes.py
-from flask import Blueprint, request, jsonify, render_template_string
+from flask import Blueprint, request, jsonify, render_template_string, url_for, current_app
 from datetime import datetime
 from .extensions import db
 from .models import Movie, Review, User
 from flask_jwt_extended import jwt_required, get_jwt_identity
+import os
+import time
+from werkzeug.utils import secure_filename
 
 main_bp = Blueprint('main', __name__)
 
@@ -17,7 +20,7 @@ HTML_LAYOUT = r"""
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rateAfilm</title>
+    <title>rateAmovie</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #121212; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -45,7 +48,7 @@ HTML_LAYOUT = r"""
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-black py-3 shadow">
         <div class="container">
-            <a class="navbar-brand fw-bold text-warning fs-4" href="/">🎬 rateAfilm</a>
+            <a class="navbar-brand fw-bold text-warning fs-4" href="/">🎬 rateAmovie</a>
             <div class="d-flex align-items-center" id="nav-actions">
                 <!-- JS fills this -->
             </div>
@@ -504,8 +507,13 @@ PAGE_CREATE = HTML_LAYOUT.replace('{{ content|safe }}', r"""
                     <input type="text" id="director" class="form-control mb-3" placeholder="e.g. Christopher Nolan">
                 </div>
                 <div class="col-md-6">
-                    <label class="mb-1 fw-bold">Poster Image URL</label>
-                    <input type="url" id="image" class="form-control mb-3" placeholder="https://image.tmdb.org/...">
+                    <label class="mb-1 fw-bold">Poster Image (drag & drop or paste link)</label>
+                    <div id="drop-area" class="form-control mb-2" style="height:120px; display:flex; align-items:center; justify-content:center; text-align:center;">
+                        <div id="drop-message">Drag an image file here, paste an image link, or <a href="#" id="choose-file">choose a file</a></div>
+                    </div>
+                    <input type="file" id="image-file" accept="image/*" style="display:none">
+                    <input type="url" id="image" class="form-control mb-3" placeholder="Or enter an image URL (optional)">
+                    <div id="preview" style="max-height:180px; overflow:hidden; display:none; margin-bottom:8px;"></div>
                 </div>
             </div>
 
@@ -536,6 +544,35 @@ PAGE_CREATE = HTML_LAYOUT.replace('{{ content|safe }}', r"""
             return;
         }
 
+        // If a file was selected (drag/drop or choose), send as FormData so server can save it.
+        const fileInput = document.getElementById('image-file');
+        if(fileInput.files && fileInput.files.length > 0) {
+            if(!requireAuth()) return;
+            const form = new FormData();
+            form.append('image_file', fileInput.files[0]);
+            form.append('title', payload.title);
+            form.append('release_date', payload.release_date);
+            form.append('description', payload.description);
+            form.append('director', payload.director);
+            form.append('cast', payload.cast);
+            // If an image URL text was provided also include it as fallback
+            const imageUrlText = document.getElementById('image').value.trim();
+            if(imageUrlText) form.append('image_url', imageUrlText);
+
+            const token = localStorage.getItem('access_token');
+            const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+            const res = await fetch('/api/movies', { method: 'POST', headers, body: form });
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('msg').innerHTML = '<span class="text-success">Movie created successfully!</span>';
+                setTimeout(() => window.location.href = '/', 1000);
+            } else {
+                document.getElementById('msg').innerHTML = `<span class="text-danger">${data.message || "Error creating movie"}</span>`;
+            }
+            return;
+        }
+
+        // Otherwise send JSON (existing behavior)
         const res = await authFetch('/api/movies', {
             method: 'POST',
             body: JSON.stringify(payload)
@@ -549,6 +586,82 @@ PAGE_CREATE = HTML_LAYOUT.replace('{{ content|safe }}', r"""
             document.getElementById('msg').innerHTML = `<span class="text-danger">${data.message || "Error creating movie"}</span>`;
         }
     }
+    // --- Drag & Drop / Paste handlers for image input ---
+    (function() {
+        const dropArea = document.getElementById('drop-area');
+        const fileInput = document.getElementById('image-file');
+        const preview = document.getElementById('preview');
+        const dropMessage = document.getElementById('drop-message');
+
+        function showPreviewFile(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                preview.innerHTML = `<img src="${e.target.result}" style="max-height:160px; width:auto; display:block; margin:8px auto; border-radius:8px;">`;
+                preview.style.display = 'block';
+                dropMessage.innerText = file.name;
+            }
+            reader.readAsDataURL(file);
+        }
+
+        function showPreviewURL(url) {
+            preview.innerHTML = `<img src="${url}" style="max-height:160px; width:auto; display:block; margin:8px auto; border-radius:8px;">`;
+            preview.style.display = 'block';
+            dropMessage.innerText = url;
+        }
+
+        document.getElementById('choose-file').addEventListener('click', (e) => {
+            e.preventDefault();
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if(fileInput.files && fileInput.files.length > 0) showPreviewFile(fileInput.files[0]);
+        });
+
+        dropArea.addEventListener('dragover', (e) => { e.preventDefault(); dropArea.style.background = '#222'; });
+        dropArea.addEventListener('dragleave', (e) => { e.preventDefault(); dropArea.style.background = ''; });
+
+        dropArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropArea.style.background = '';
+            const dt = e.dataTransfer;
+            if(dt.files && dt.files.length > 0) {
+                // put file into the input
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(dt.files[0]);
+                fileInput.files = dataTransfer.files;
+                showPreviewFile(dt.files[0]);
+            } else {
+                const text = dt.getData('text/uri-list') || dt.getData('text/plain');
+                if(text) {
+                    document.getElementById('image').value = text;
+                    showPreviewURL(text);
+                }
+            }
+        });
+
+        // handle paste (image or link)
+        dropArea.addEventListener('paste', (e) => {
+            const items = (e.clipboardData || window.clipboardData).items;
+            for(let i=0;i<items.length;i++){
+                const item = items[i];
+                if(item.kind === 'file'){
+                    const file = item.getAsFile();
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(file);
+                    fileInput.files = dataTransfer.files;
+                    showPreviewFile(file);
+                    return;
+                } else if(item.kind === 'string'){
+                    item.getAsString(function(s){
+                        document.getElementById('image').value = s;
+                        showPreviewURL(s);
+                    });
+                    return;
+                }
+            }
+        });
+    })();
 </script>
 """)
 
@@ -692,11 +805,45 @@ def get_movie_reviews(movie_id):
 @jwt_required() # Ensure user is logged in with a valid JWT
 def create_movie_api():
     try:
-        data = request.get_json()
-        
-        # 1. Handle Date Parsing
-        date_str = data.get('release_date')
+        # Support both JSON and multipart/form-data (for file upload)
+        image_url = ''
         release_date_obj = None
+
+        if request.files and 'image_file' in request.files:
+            # Form submission with file
+            file = request.files['image_file']
+            # basic validation
+            if file and file.filename:
+                if not file.mimetype.startswith('image/'):
+                    return jsonify({"message": "Uploaded file must be an image"}), 400
+
+                uploads_dir = os.path.join(current_app.static_folder, 'uploads')
+                os.makedirs(uploads_dir, exist_ok=True)
+                filename = f"{int(time.time())}_{secure_filename(file.filename)}"
+                save_path = os.path.join(uploads_dir, filename)
+                file.save(save_path)
+                image_url = url_for('static', filename=f'uploads/{filename}', _external=False)
+
+            # get other fields from form
+            title = request.form.get('title')
+            date_str = request.form.get('release_date')
+            description = request.form.get('description', '')
+            director = request.form.get('director', '')
+            cast = request.form.get('cast', '')
+            # if a textual image_url was also provided use that as fallback
+            if not image_url:
+                image_url = request.form.get('image_url', '')
+            data_title = title
+        else:
+            data = request.get_json() or {}
+            data_title = data.get('title')
+            date_str = data.get('release_date')
+            description = data.get('description', '')
+            director = data.get('director', '')
+            cast = data.get('cast', '')
+            image_url = data.get('image_url', '')
+
+        # 1. Handle Date Parsing
         if date_str:
             try:
                 # HTML input type="date" returns YYYY-MM-DD
@@ -704,14 +851,17 @@ def create_movie_api():
             except ValueError:
                 return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
 
+        if not data_title:
+            return jsonify({"message": "Title is required"}), 400
+
         # 2. Create Movie with new fields
         new_movie = Movie(
-            title=data['title'],
-            description=data.get('description', ''),
+            title=data_title,
+            description=description,
             release_date=release_date_obj,
-            image_url=data.get('image_url', ''), 
-            director=data.get('director', ''),   
-            cast=data.get('cast', '')            
+            image_url=image_url,
+            director=director,
+            cast=cast
         )
 
         db.session.add(new_movie)
