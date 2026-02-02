@@ -24,9 +24,18 @@ HTML_LAYOUT = r"""
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #121212; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .card { background-color: #1f1f1f; color: white; border: none; margin-bottom: 20px; border-radius: 12px; transition: transform 0.2s; }
-        .card:hover { transform: translateY(-4px); box-shadow: 0 8px 16px rgba(255,193,7,0.2); }
+        .card { background-color: #1f1f1f; color: white; border: none; margin-bottom: 20px; border-radius: 12px; }
         .movie-card { cursor: pointer; }
+        .flip-card { background-color: transparent; width: 100%; height: 400px; perspective: 1000px; }
+        .flip-card-inner { position: relative; width: 100%; height: 100%; transition: transform 0.6s; transform-style: preserve-3d; }
+        .flip-card:hover .flip-card-inner { transform: rotateY(180deg); }
+        .flip-card-front, .flip-card-back { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; background-color: #1f1f1f; border-radius: 12px; }
+        .flip-card-front { color: white; }
+        .flip-card-back { color: white; transform: rotateY(180deg); overflow: hidden; position: relative; }
+        .flip-card-front { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding: 1.5rem; }
+        .flip-card-back { padding: 1.5rem; }
+        .top-reviews { position: relative; max-height: 160px; overflow: hidden; }
+        .top-reviews .fade-overlay { position: absolute; left: 0; right: 0; bottom: 0; height: 48px; background: linear-gradient(rgba(31,31,31,0), rgba(31,31,31,1)); pointer-events: none; }
         .text-warning { color: #ffc107 !important; }
         .form-control, .form-select { background-color: #2b2b2b; border: 1px solid #444; color: white; border-radius: 8px; }
         .form-control::placeholder { color: #a6a6a6; opacity: 1; }
@@ -232,20 +241,75 @@ PAGE_HOME = HTML_LAYOUT.replace('{{ content|safe }}', r"""
 
             container.innerHTML += `
                 <div class="col-md-4 col-lg-3">
-                    <div class="card p-3 h-100 movie-card" onclick="window.location.href='/movie/${m.id}'">
-                        ${imageHtml}
-                        <h5 class="mb-2 text-truncate">${m.title}</h5>
-                        <div class="d-flex align-items-center mb-2">
-                            <span class="badge-rating me-2">★ ${typeof avgRating === 'number' ? avgRating.toFixed(1) : 'N/A'}</span>
-                            <span class="small text-secondary">By ${m.director || 'Unknown'}</span>
+                    <div class="flip-card">
+                        <div class="flip-card-inner">
+                            <div class="flip-card-front">
+                                ${imageHtml}
+                                <h5 class="text-center mt-2">${m.title}</h5>
+                            </div>
+                            <div class="flip-card-back">
+                                <h6 class="mb-2 text-warning">Top Reviews</h6>
+                                <div id="top-reviews-${m.id}" class="top-reviews" style="font-size: 0.85rem;">
+                                    <p class="text-secondary text-center">Loading...</p>
+                                    <div class="fade-overlay"></div>
+                                </div>
+                                <div class="mt-2 pt-2 border-top border-secondary">
+                                    <button onclick="window.location.href='/movie/${m.id}'" class="btn btn-sm btn-warning w-100">View Details</button>
+                                </div>
+                            </div>
                         </div>
-                        <p class="small text-secondary mb-1">Released: ${m.release_date}</p>
-                        <p class="small text-secondary mb-2">Posted by: ${creatorHtml}</p>
-                        <p class="small text-light mb-0">${m.description.substring(0, 80)}${m.description.length > 80 ? '...' : ''}</p>
                     </div>
                 </div>
             `;
+            
+            // Load top 3 reviews for this movie
+            loadTopReviewsForMovie(m.id);
         });
+    }
+    
+    async function loadTopReviewsForMovie(movieId) {
+        try {
+            const res = await fetch(`/api/movies/${movieId}/reviews`);
+            const reviews = await res.json();
+            const container = document.getElementById(`top-reviews-${movieId}`);
+
+            if(reviews.length === 0) {
+                container.innerHTML = '<p class="text-secondary text-center">No reviews yet</p>';
+                return;
+            }
+
+            // Fetch votes for all reviews, attach likes count
+            const votesPromises = reviews.map(r =>
+                fetch(`/api/reviews/${r.id}/votes`).then(v => v.ok ? v.json() : {likes:0}).catch(() => ({likes:0}))
+            );
+            const votesArr = await Promise.all(votesPromises);
+            reviews.forEach((r, idx) => { r._likes = (votesArr[idx] && votesArr[idx].likes) ? votesArr[idx].likes : 0; });
+
+            // Sort by likes descending and show top 3
+            const top = reviews.sort((a,b) => (b._likes || 0) - (a._likes || 0)).slice(0, 3);
+
+            container.innerHTML = '';
+            top.forEach(r => {
+                const profilePic = r.profile_picture ? `<img src="${r.profile_picture}" style="width: 20px; height: 20px; border-radius: 50%; object-fit: cover; margin-right: 6px;">` : `<div style="width: 20px; height: 20px; border-radius: 50%; background: #444; display: inline-flex; align-items: center; justify-content: center; font-size: 0.6rem; margin-right: 6px;">👤</div>`;
+                container.innerHTML += `
+                    <div style="margin-bottom: 10px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                            <div style="display:flex; align-items:center;">
+                                ${profilePic}
+                                <strong style="color: #ffc107; font-size: 0.8rem;">${r.username}</strong>
+                            </div>
+                            <div style="color: #ffc107; font-size: 0.9rem;">👍${r._likes}</div>
+                        </div>
+                        <div style="color: #ffc107; font-size: 0.75rem; margin-bottom: 4px;">${displayStars(r.rating)}</div>
+                        <p style="margin: 0; font-size: 0.8rem; color: #ccc;">${r.content.substring(0, 80)}${r.content.length > 80 ? '...' : ''}</p>
+                    </div>
+                `;
+            });
+
+            container.innerHTML += '<div class="fade-overlay"></div>';
+        } catch(e) {
+            document.getElementById(`top-reviews-${movieId}`).innerHTML = '<p class="text-danger">Error loading reviews</p>';
+        }
     }
     
     function filterAndSort() {
@@ -365,6 +429,7 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
         const res = await fetch(`/api/movies/${movieId}/reviews`);
         const reviews = await res.json();
         const container = document.getElementById('reviews-list');
+        const currentUserId = localStorage.getItem('user_id');
         
         if(reviews.length === 0) {
             container.innerHTML = `
@@ -376,7 +441,6 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
         }
         
         container.innerHTML = '';
-        const currentUserId = localStorage.getItem('user_id');
         reviews.forEach(r => {
             const isOwner = currentUserId && parseInt(currentUserId) === r.user_id;
             const editButton = isOwner ? `
@@ -395,7 +459,7 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
                 : `<div style="width: 40px; height: 40px; border-radius: 50%; background: #444; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">👤</div>`;
 
             container.innerHTML += `
-                <div class="review-card">
+                <div class="review-card" id="review-${r.id}">
                     <div class="d-flex gap-3 mb-2">
                         <div style="flex-shrink: 0;">
                             ${profilePicHtml}
@@ -414,10 +478,71 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
                             </div>
                         </div>
                     </div>
-                    <p class="mb-0 text-light">${r.content}</p>
+                    <p class="mb-3 text-light">${r.content}</p>
+                    ${isLoggedIn() ? `<div class="d-flex gap-3 align-items-center" style="font-size: 1rem;">
+                        <span style="cursor: pointer; transition: opacity 0.2s;" onclick="likeReview(${r.id}, true)" id="like-vote-${r.id}">👍<span id="like-count-${r.id}">0</span></span>
+                        <span style="cursor: pointer; transition: opacity 0.2s;" onclick="likeReview(${r.id}, false)" id="dislike-vote-${r.id}">👎<span id="dislike-count-${r.id}">0</span></span>
+                    </div>` : `<div class="d-flex gap-3 align-items-center" style="font-size: 1rem; color: #888;">
+                        <span>👍<span id="like-count-${r.id}">0</span></span>
+                        <span>👎<span id="dislike-count-${r.id}">0</span></span>
+                    </div>`}
                 </div>
             `;
+            
+            // Load vote counts
+            if(isLoggedIn()) {
+                loadVoteCounts(r.id);
+            } else {
+                loadVoteCountsGuest(r.id);
+            }
         });
+    }
+    
+    async function loadVoteCounts(reviewId) {
+        const currentUserId = localStorage.getItem('user_id');
+        const res = await fetch(`/api/reviews/${reviewId}/votes?user_id=${currentUserId}`);
+        const data = await res.json();
+        
+        document.getElementById(`like-count-${reviewId}`).textContent = data.likes;
+        document.getElementById(`dislike-count-${reviewId}`).textContent = data.dislikes;
+        
+        // Update styling based on user's vote
+        const likeVote = document.getElementById(`like-vote-${reviewId}`);
+        const dislikeVote = document.getElementById(`dislike-vote-${reviewId}`);
+        
+        if(data.user_vote === true) {
+            likeVote.style.opacity = '1';
+            dislikeVote.style.opacity = '0.5';
+        } else if(data.user_vote === false) {
+            dislikeVote.style.opacity = '1';
+            likeVote.style.opacity = '0.5';
+        } else {
+            likeVote.style.opacity = '0.7';
+            dislikeVote.style.opacity = '0.7';
+        }
+    }
+    
+    async function loadVoteCountsGuest(reviewId) {
+        const res = await fetch(`/api/reviews/${reviewId}/votes`);
+        const data = await res.json();
+        
+        document.getElementById(`like-count-${reviewId}`).textContent = data.likes;
+        document.getElementById(`dislike-count-${reviewId}`).textContent = data.dislikes;
+    }
+    
+    async function likeReview(reviewId, isLike) {
+        if(!requireAuth()) return;
+        
+        const res = await authFetch(`/api/reviews/${reviewId}/like`, {
+            method: 'POST',
+            body: JSON.stringify({ is_like: isLike })
+        });
+        
+        if(res.ok) {
+            await loadVoteCounts(reviewId);
+        } else {
+            alert('Error updating vote');
+        }
     }
     
     async function submitReview() {
@@ -1250,3 +1375,78 @@ def update_user_profile():
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": f"Error updating profile: {str(e)}"}), 500
+
+@main_bp.route('/api/reviews/<int:review_id>/like', methods=['POST'])
+@jwt_required()
+def like_review(review_id):
+    from .models import ReviewLike
+    current_user_id = int(get_jwt_identity())
+    
+    review = Review.query.get_or_404(review_id)
+    
+    try:
+        data = request.get_json() or {}
+        is_like = data.get('is_like', True)  # True for like, False for dislike
+        
+        # Check if user already has a like/dislike for this review
+        existing_like = ReviewLike.query.filter_by(review_id=review_id, user_id=current_user_id).first()
+        
+        if existing_like:
+            if existing_like.is_like == is_like:
+                # User is trying to like/dislike again, so remove it
+                db.session.delete(existing_like)
+            else:
+                # User is changing their vote
+                existing_like.is_like = is_like
+        else:
+            # Create new like/dislike
+            new_like = ReviewLike(review_id=review_id, user_id=current_user_id, is_like=is_like)
+            db.session.add(new_like)
+        
+        db.session.commit()
+        
+        # Count likes and dislikes
+        likes = ReviewLike.query.filter_by(review_id=review_id, is_like=True).count()
+        dislikes = ReviewLike.query.filter_by(review_id=review_id, is_like=False).count()
+        
+        # Get current user's vote
+        user_vote = ReviewLike.query.filter_by(review_id=review_id, user_id=current_user_id).first()
+        user_vote_type = user_vote.is_like if user_vote else None
+        
+        return jsonify({
+            "message": "Vote recorded",
+            "likes": likes,
+            "dislikes": dislikes,
+            "user_vote": user_vote_type
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": f"Error liking review: {str(e)}"}), 500
+
+@main_bp.route('/api/reviews/<int:review_id>/votes', methods=['GET'])
+def get_review_votes(review_id):
+    from .models import ReviewLike
+    
+    try:
+        likes = ReviewLike.query.filter_by(review_id=review_id, is_like=True).count()
+        dislikes = ReviewLike.query.filter_by(review_id=review_id, is_like=False).count()
+        
+        user_vote = None
+        # Check for optional user_id query param (provided by client) to return that user's vote
+        current_user_id = request.args.get('user_id')
+        if current_user_id:
+            try:
+                uid = int(current_user_id)
+                user_like = ReviewLike.query.filter_by(review_id=review_id, user_id=uid).first()
+                user_vote = user_like.is_like if user_like else None
+            except ValueError:
+                # ignore invalid user_id values
+                user_vote = None
+        
+        return jsonify({
+            "likes": likes,
+            "dislikes": dislikes,
+            "user_vote": user_vote
+        }), 200
+    except Exception as e:
+        return jsonify({"message": f"Error fetching votes: {str(e)}"}), 500

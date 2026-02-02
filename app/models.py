@@ -107,3 +107,16 @@ class Review(db.Model):
     
     # Add relationship to access username easily
     user = db.relationship('User', backref='user_reviews', lazy=True)
+    likes = db.relationship('ReviewLike', backref='review', lazy=True, cascade="all, delete-orphan")
+
+class ReviewLike(db.Model):
+    __tablename__ = 'review_likes'
+    id = db.Column(db.Integer, primary_key=True)
+    review_id = db.Column(db.Integer, db.ForeignKey('reviews.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    is_like = db.Column(db.Boolean, nullable=False)  # True for like, False for dislike
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', backref='review_likes', lazy=True)
+    
+    __table_args__ = (db.UniqueConstraint('review_id', 'user_id', name='unique_user_review_like'),)
