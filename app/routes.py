@@ -17,7 +17,7 @@ HTML_LAYOUT = r"""
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rateAmovie</title>
+    <title>rateAfilm</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #121212; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -45,7 +45,7 @@ HTML_LAYOUT = r"""
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-black py-3 shadow">
         <div class="container">
-            <a class="navbar-brand fw-bold text-warning fs-4" href="/">🎬 rateAmovie</a>
+            <a class="navbar-brand fw-bold text-warning fs-4" href="/">🎬 rateAfilm</a>
             <div class="d-flex align-items-center" id="nav-actions">
                 <!-- JS fills this -->
             </div>
@@ -58,9 +58,10 @@ HTML_LAYOUT = r"""
 
     <script>
         // --- Auth Logic ---
-        function saveToken(token, username) {
+        function saveToken(token, username, userId) {
             localStorage.setItem('access_token', token);
             localStorage.setItem('username', username);
+            localStorage.setItem('user_id', userId);
             window.location.href = '/';
         }
 
@@ -360,7 +361,15 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
         }
         
         container.innerHTML = '';
+        const currentUserId = localStorage.getItem('user_id');
         reviews.forEach(r => {
+            const isOwner = currentUserId && parseInt(currentUserId) === r.user_id;
+            const editButton = isOwner ? `
+                <button class="btn btn-sm btn-warning" onclick="editReview(${r.id}, ${movieId})" title="Edit review">
+                    ✏️ Edit
+                </button>
+            ` : '';
+            
             container.innerHTML += `
                 <div class="review-card">
                     <div class="d-flex justify-content-between align-items-start mb-2">
@@ -368,7 +377,10 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
                             <strong>${r.username}</strong>
                             <div class="text-warning mt-1">${displayStars(r.rating)}</div>
                         </div>
-                        <small class="text-secondary">${new Date(r.created_at).toLocaleDateString()}</small>
+                        <div class="d-flex gap-2 align-items-center">
+                            ${editButton}
+                            <small class="text-secondary">${new Date(r.created_at).toLocaleDateString()}</small>
+                        </div>
                     </div>
                     <p class="mb-0 text-light">${r.content}</p>
                 </div>
@@ -406,6 +418,39 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
             setTimeout(() => location.reload(), 1500);
         } else {
             document.getElementById('review-msg').innerHTML = `<span class="text-danger">${data.message || 'Error submitting review'}</span>`;
+        }
+    }
+    
+    async function editReview(reviewId, movieId) {
+        const newRating = prompt('New rating (1-5):');
+        if(newRating === null) return;
+        
+        const rating = parseInt(newRating);
+        if(isNaN(rating) || rating < 1 || rating > 5) {
+            alert('Please enter a valid rating between 1 and 5');
+            return;
+        }
+        
+        const newContent = prompt('New review content:');
+        if(newContent === null) return;
+        
+        if(!newContent.trim()) {
+            alert('Please enter review content');
+            return;
+        }
+        
+        const res = await authFetch(`/api/reviews/${reviewId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ rating, content: newContent.trim() })
+        });
+        
+        const data = await res.json();
+        
+        if(res.ok) {
+            alert('Review updated successfully!');
+            location.reload();
+        } else {
+            alert(`Error updating review: ${data.message || 'Unknown error'}`);
         }
     }
     
@@ -518,7 +563,7 @@ PAGE_LOGIN = HTML_LAYOUT.replace('{{ content|safe }}', r"""
         
         const data = await res.json();
         if(res.ok) {
-            saveToken(data.access_token, data.username);
+            saveToken(data.access_token, data.username, data.user_id);
         } else {
             document.getElementById('err').innerText = data.message || 'Login failed';
         }
@@ -617,6 +662,7 @@ def get_movie_reviews(movie_id):
         'rating': r.rating,
         'content': r.content,
         'username': r.user.username,
+        'user_id': r.user_id,
         'created_at': r.created_at.isoformat()
     } for r in reviews]), 200
 
@@ -681,3 +727,27 @@ def rate_movie(movie_id):
     db.session.add(review)
     db.session.commit()
     return jsonify({"message": "Review added successfully"}), 201
+
+@main_bp.route('/api/reviews/<int:review_id>', methods=['PUT'])
+@jwt_required()
+def update_review(review_id):
+    current_user_id = int(get_jwt_identity())
+    data = request.get_json()
+    
+    review = Review.query.get_or_404(review_id)
+    
+    # Check if the user owns this review
+    if review.user_id != current_user_id:
+        return jsonify({"message": "You can only edit your own reviews"}), 403
+    
+    if not data.get('rating') or not data.get('content'):
+        return jsonify({"message": "Rating and content are required"}), 400
+    
+    if not (1 <= data['rating'] <= 5):
+        return jsonify({"message": "Rating must be between 1 and 5"}), 400
+    
+    review.rating = data['rating']
+    review.content = data['content']
+    db.session.commit()
+    
+    return jsonify({"message": "Review updated successfully"}), 200

@@ -37,7 +37,7 @@ def login():
     if user and user.check_password(data.get('password')):
         access_token = create_access_token(identity=str(user.id), expires_delta=Config.JWT_ACCESS_TOKEN_EXPIRES)
         refresh_token = create_refresh_token(identity=str(user.id), expires_delta=Config.JWT_REFRESH_TOKEN_EXPIRES)
-        return jsonify(access_token=access_token, refresh_token=refresh_token, username=user.username), 200
+        return jsonify(access_token=access_token, refresh_token=refresh_token, username=user.username, user_id=user.id), 200
 
     return jsonify({"message": "Invalid credentials"}), 401
 
