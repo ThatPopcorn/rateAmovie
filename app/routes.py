@@ -369,7 +369,12 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
                     ✏️ Edit
                 </button>
             ` : '';
-            
+            const deleteButton = isOwner ? `
+                <button class="btn btn-sm btn-danger" onclick="deleteReview(${r.id})" title="Delete review">
+                    🗑️ Delete
+                </button>
+            ` : '';
+
             container.innerHTML += `
                 <div class="review-card">
                     <div class="d-flex justify-content-between align-items-start mb-2">
@@ -379,6 +384,7 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
                         </div>
                         <div class="d-flex gap-2 align-items-center">
                             ${editButton}
+                            ${deleteButton}
                             <small class="text-secondary">${new Date(r.created_at).toLocaleDateString()}</small>
                         </div>
                     </div>
@@ -451,6 +457,22 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
             location.reload();
         } else {
             alert(`Error updating review: ${data.message || 'Unknown error'}`);
+        }
+    }
+    
+    async function deleteReview(reviewId) {
+        if(!confirm('Are you sure you want to delete this review?')) return;
+
+        const res = await authFetch(`/api/reviews/${reviewId}`, {
+            method: 'DELETE'
+        });
+
+        const data = await res.json();
+        if(res.ok) {
+            alert('Review deleted');
+            location.reload();
+        } else {
+            alert(`Error deleting review: ${data.message || 'Unknown error'}`);
         }
     }
     
@@ -751,3 +773,18 @@ def update_review(review_id):
     db.session.commit()
     
     return jsonify({"message": "Review updated successfully"}), 200
+
+
+@main_bp.route('/api/reviews/<int:review_id>', methods=['DELETE'])
+@jwt_required()
+def delete_review(review_id):
+    current_user_id = int(get_jwt_identity())
+    review = Review.query.get_or_404(review_id)
+
+    # Only owner can delete
+    if review.user_id != current_user_id:
+        return jsonify({"message": "You can only delete your own reviews"}), 403
+
+    db.session.delete(review)
+    db.session.commit()
+    return jsonify({"message": "Review deleted successfully"}), 200
