@@ -1,6 +1,15 @@
 # app/models.py
-from datetime import datetime
+from datetime import datetime, timedelta
 from .extensions import db, bcrypt
+import jwt
+from flask import current_app
+
+class TokenBlacklist(db.Model):
+    __tablename__ = 'token_blacklist'
+    id = db.Column(db.Integer, primary_key=True)
+    jti = db.Column(db.String(255), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
 
 class User(db.Model):
     __tablename__ = 'users'

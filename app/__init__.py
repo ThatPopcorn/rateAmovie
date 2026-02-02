@@ -21,6 +21,14 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
     limiter.init_app(app)
 
+    # JWT callback to check blacklist
+    @jwt.token_in_blocklist_loader
+    def check_if_token_revoked(jwt_header, jwt_payload):
+        from .models import TokenBlacklist
+        jti = jwt_payload.get('jti')
+        blacklist_entry = TokenBlacklist.query.filter_by(jti=jti).first()
+        return blacklist_entry is not None
+
     # Import and register Blueprints
     from .auth import auth_bp
     from .routes import main_bp

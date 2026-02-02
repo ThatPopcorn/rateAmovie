@@ -10,10 +10,11 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # JWT Configuration
-    JWT_SECRET_KEY = os.environ.get('DazxPbWNbkAMWZaykrBQj9zvC5hWDFhhFrCLiFyvhN2FYXCm5JNsQa7eErqKKowA9VRsSbTQS5WWKXWsXNDcnpqFQjRgt') or secrets.token_hex(16)
+    JWT_SECRET_KEY = os.environ.get('DazxPbWNbkAMWZaykrBQj9zvC5hWDFhhFrCLiFyvhN2FYXCm5JNsQa7eErqKKowA9VRsSbTQS5WWKXWsXNDcnpqFQjRgt') or 'your-default-persistent-secret-key-change-in-production'
     PROPAGATE_EXCEPTIONS = True
 
     # Login expiration
     # This cannot be timedelta object directly, so we define it here
     # It cannot also be defined inside the of the .env file as it needs to be a timedelta object
     JWT_ACCESS_TOKEN_EXPIRES = datetime.timedelta(hours=1)
+    JWT_REFRESH_TOKEN_EXPIRES = datetime.timedelta(days=30)
