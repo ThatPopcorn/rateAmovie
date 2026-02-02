@@ -29,6 +29,27 @@ def create_app(config_class=Config):
         blacklist_entry = TokenBlacklist.query.filter_by(jti=jti).first()
         return blacklist_entry is not None
 
+    # JWT error handlers
+    @jwt.expired_token_loader
+    def expired_token_callback(jwt_header, jwt_payload):
+        from flask import jsonify
+        return jsonify({"message": "Token has expired"}), 401
+
+    @jwt.invalid_token_loader
+    def invalid_token_callback(error):
+        from flask import jsonify
+        return jsonify({"message": "Invalid token"}), 401
+
+    @jwt.unauthorized_loader
+    def missing_token_callback(error):
+        from flask import jsonify
+        return jsonify({"message": "Request does not contain an access token"}), 401
+
+    @jwt.revoked_token_loader
+    def revoked_token_callback(jwt_header, jwt_payload):
+        from flask import jsonify
+        return jsonify({"message": "Token has been revoked"}), 401
+
     # Import and register Blueprints
     from .auth import auth_bp
     from .routes import main_bp

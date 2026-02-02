@@ -622,29 +622,29 @@ def get_movie_reviews(movie_id):
 @main_bp.route('/api/movies', methods=['POST'])
 @jwt_required() # Ensure user is logged in with a valid JWT
 def create_movie_api():
-    data = request.get_json()
-    
-    # 1. Handle Date Parsing
-    date_str = data.get('release_date')
-    release_date_obj = None
-    if date_str:
-        try:
-            # HTML input type="date" returns YYYY-MM-DD
-            release_date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-        except ValueError:
-            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
-
-    # 2. Create Movie with new fields
-    new_movie = Movie(
-        title=data['title'],
-        description=data.get('description', ''),
-        release_date=release_date_obj,
-        image_url=data.get('image_url', ''), 
-        director=data.get('director', ''),   
-        cast=data.get('cast', '')            
-    )
-
     try:
+        data = request.get_json()
+        
+        # 1. Handle Date Parsing
+        date_str = data.get('release_date')
+        release_date_obj = None
+        if date_str:
+            try:
+                # HTML input type="date" returns YYYY-MM-DD
+                release_date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        # 2. Create Movie with new fields
+        new_movie = Movie(
+            title=data['title'],
+            description=data.get('description', ''),
+            release_date=release_date_obj,
+            image_url=data.get('image_url', ''), 
+            director=data.get('director', ''),   
+            cast=data.get('cast', '')            
+        )
+
         db.session.add(new_movie)
         db.session.commit()
         return jsonify({"message": "Movie added successfully", "movie": new_movie.to_dict()}), 201
@@ -655,7 +655,7 @@ def create_movie_api():
 @main_bp.route('/api/movies/<int:movie_id>/rate', methods=['POST'])
 @jwt_required() # Ensure user is logged in with a valid JWT
 def rate_movie(movie_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = int(get_jwt_identity())
     data = request.get_json()
     
     Movie.query.get_or_404(movie_id)  # Ensure movie exists
