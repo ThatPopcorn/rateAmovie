@@ -148,8 +148,10 @@ HTML_LAYOUT = r"""
             const nav = document.getElementById('nav-actions');
             if (isLoggedIn()) {
                 const user = localStorage.getItem('username');
+                const userId = localStorage.getItem('user_id');
                 nav.innerHTML = `
                     <a href="/create-movie" class="btn btn-outline-success btn-sm me-3">+ Add Movie</a>
+                    <a href="/profile?user_id=${userId}" class="btn btn-outline-warning btn-sm me-3">👤 Profile</a>
                     <span class="text-secondary me-3">Hello, <strong>${user}</strong></span>
                     <button onclick="logout()" class="btn btn-outline-danger btn-sm">Logout</button>
                 `;
@@ -218,6 +220,15 @@ PAGE_HOME = HTML_LAYOUT.replace('{{ content|safe }}', r"""
             if(m.image_url) {
                 imageHtml = `<img src="${m.image_url}" class="movie-poster" style="object-fit: cover;" alt="${m.title}">`;
             }
+            
+            // Creator profile picture
+            let creatorHtml = 'Unknown';
+            if (m.creator) {
+                const creatorProfilePic = m.creator.profile_picture 
+                    ? `<img src="${m.creator.profile_picture}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; border: 1px solid #ffc107; margin-right: 6px;">`
+                    : `<div style="width: 24px; height: 24px; border-radius: 50%; background: #444; display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; margin-right: 6px;">👤</div>`;
+                creatorHtml = `<a href="/profile?user_id=${m.creator.id}" style="color: #ffc107; text-decoration: none; display: flex; align-items: center;">${creatorProfilePic}<span>${m.creator.username}</span></a>`;
+            }
 
             container.innerHTML += `
                 <div class="col-md-4 col-lg-3">
@@ -229,6 +240,7 @@ PAGE_HOME = HTML_LAYOUT.replace('{{ content|safe }}', r"""
                             <span class="small text-secondary">By ${m.director || 'Unknown'}</span>
                         </div>
                         <p class="small text-secondary mb-1">Released: ${m.release_date}</p>
+                        <p class="small text-secondary mb-2">Posted by: ${creatorHtml}</p>
                         <p class="small text-light mb-0">${m.description.substring(0, 80)}${m.description.length > 80 ? '...' : ''}</p>
                     </div>
                 </div>
@@ -377,18 +389,29 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
                     🗑️ Delete
                 </button>
             ` : '';
+            
+            const profilePicHtml = r.profile_picture 
+                ? `<img src="${r.profile_picture}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 2px solid #ffc107;">`
+                : `<div style="width: 40px; height: 40px; border-radius: 50%; background: #444; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">👤</div>`;
 
             container.innerHTML += `
                 <div class="review-card">
-                    <div class="d-flex justify-content-between align-items-start mb-2">
-                        <div>
-                            <strong>${r.username}</strong>
-                            <div class="text-warning mt-1">${displayStars(r.rating)}</div>
+                    <div class="d-flex gap-3 mb-2">
+                        <div style="flex-shrink: 0;">
+                            ${profilePicHtml}
                         </div>
-                        <div class="d-flex gap-2 align-items-center">
-                            ${editButton}
-                            ${deleteButton}
-                            <small class="text-secondary">${new Date(r.created_at).toLocaleDateString()}</small>
+                        <div style="flex-grow: 1;">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <a href="/profile?user_id=${r.user_id}" style="color: #ffc107; text-decoration: none;"><strong>${r.username}</strong></a>
+                                    <div class="text-warning mt-1">${displayStars(r.rating)}</div>
+                                </div>
+                                <div class="d-flex gap-2 align-items-center">
+                                    ${editButton}
+                                    ${deleteButton}
+                                    <small class="text-secondary">${new Date(r.created_at).toLocaleDateString()}</small>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <p class="mb-0 text-light">${r.content}</p>
@@ -665,6 +688,230 @@ PAGE_CREATE = HTML_LAYOUT.replace('{{ content|safe }}', r"""
 </script>
 """)
 
+PAGE_PROFILE = HTML_LAYOUT.replace('{{ content|safe }}', r"""
+<div class="row">
+    <div class="col-md-4">
+        <div class="card p-4">
+            <div id="profile-picture-container" class="mb-3" style="text-align: center;">
+                <div style="width: 150px; height: 150px; border-radius: 50%; background: #2a2a2a; margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 3rem; color: #444;" id="profile-pic-display">👤</div>
+            </div>
+            <h3 id="username-display" class="text-center mb-1"></h3>
+            <p id="email-display" class="text-center text-secondary mb-3"></p>
+            <hr>
+            <div class="mb-3">
+                <p class="small text-secondary mb-1"><strong>Bio</strong></p>
+                <p id="bio-display" class="text-light"></p>
+            </div>
+            <div class="mb-3">
+                <p class="small text-secondary mb-1"><strong>Favorite Genres</strong></p>
+                <p id="genres-display" class="text-light"></p>
+            </div>
+            <div id="edit-button-container"></div>
+        </div>
+    </div>
+    
+    <div class="col-md-8">
+        <div class="card p-4" id="edit-form-section" style="display: none;">
+            <h4 class="mb-4">Edit Profile</h4>
+            
+            <div class="mb-3">
+                <label class="mb-2"><strong>Profile Picture</strong></label>
+                <div id="profile-upload-drop" style="border: 2px dashed #444; border-radius: 8px; padding: 2rem; text-align: center; background: #2b2b2b; cursor: pointer;">
+                    <p class="text-secondary mb-2">Click to upload or drag and drop</p>
+                    <small class="text-secondary">PNG, JPG (Max 5MB)</small>
+                    <input type="file" id="profile-picture-file" accept="image/*" style="display: none;">
+                </div>
+                <div id="profile-preview" style="margin-top: 1rem;"></div>
+            </div>
+            
+            <div class="mb-3">
+                <label class="mb-2"><strong>Bio</strong></label>
+                <textarea id="bio-input" class="form-control" placeholder="Tell us about yourself..." style="min-height: 100px;"></textarea>
+            </div>
+            
+            <div class="mb-3">
+                <label class="mb-2"><strong>Favorite Genres</strong></label>
+                <input type="text" id="genres-input" class="form-control" placeholder="e.g. Action, Drama, Comedy (comma-separated)">
+            </div>
+            
+            <button onclick="saveProfile()" class="btn btn-warning me-2">Save Changes</button>
+            <button onclick="cancelEdit()" class="btn btn-outline-secondary">Cancel</button>
+            <p id="profile-msg" class="mt-3"></p>
+        </div>
+        
+        <div id="profile-view-section">
+            <h4 class="mb-3">Recent Reviews</h4>
+            <div id="user-reviews-list"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const currentUserId = localStorage.getItem('user_id');
+    const profileUserId = new URLSearchParams(window.location.search).get('user_id') || currentUserId;
+    let currentProfile = null;
+    
+    async function loadProfile() {
+        try {
+            const res = await fetch(`/api/users/${profileUserId}`);
+            if (!res.ok) {
+                document.body.innerHTML = '<div class="text-center mt-5"><h3>User not found</h3></div>';
+                return;
+            }
+            
+            currentProfile = await res.json();
+            displayProfile();
+            loadUserReviews();
+        } catch (e) {
+            console.error('Error loading profile:', e);
+        }
+    }
+    
+    function displayProfile() {
+        document.getElementById('username-display').textContent = currentProfile.username;
+        document.getElementById('email-display').textContent = currentProfile.email;
+        document.getElementById('bio-display').textContent = currentProfile.bio || '(No bio added yet)';
+        document.getElementById('genres-display').textContent = currentProfile.favorite_genres || '(No genres selected)';
+        
+        // Profile picture
+        const picContainer = document.getElementById('profile-picture-container');
+        if (currentProfile.profile_picture) {
+            picContainer.innerHTML = `<img src="${currentProfile.profile_picture}" style="width: 150px; height: 150px; border-radius: 50%; object-fit: cover; border: 3px solid #ffc107;">`;
+        } else {
+            picContainer.innerHTML = `<div style="width: 150px; height: 150px; border-radius: 50%; background: #2a2a2a; margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 3rem; color: #444;">👤</div>`;
+        }
+        
+        // Show edit button only for own profile
+        const editContainer = document.getElementById('edit-button-container');
+        if (currentUserId && parseInt(currentUserId) === currentProfile.id && isLoggedIn()) {
+            editContainer.innerHTML = '<button onclick="startEdit()" class="btn btn-warning w-100">Edit Profile</button>';
+        } else {
+            editContainer.innerHTML = '';
+        }
+    }
+    
+    async function loadUserReviews() {
+        try {
+            const res = await fetch('/api/movies');
+            const movies = await res.json();
+            const container = document.getElementById('user-reviews-list');
+            
+            let userReviews = [];
+            for (let movie of movies) {
+                const reviewRes = await fetch(`/api/movies/${movie.id}/reviews`);
+                const reviews = await reviewRes.json();
+                userReviews = userReviews.concat(reviews.filter(r => r.user_id == profileUserId).map(r => ({...r, movie_title: movie.title, movie_id: movie.id})));
+            }
+            
+            if (userReviews.length === 0) {
+                container.innerHTML = '<p class="text-secondary">No reviews yet</p>';
+                return;
+            }
+            
+            container.innerHTML = '';
+            userReviews.forEach(review => {
+                container.innerHTML += `
+                    <div class="review-card">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <strong><a href="/movie/${review.movie_id}" style="color: #ffc107; text-decoration: none;">${review.movie_title}</a></strong>
+                                <div class="text-warning mt-1">${displayStars(review.rating)}</div>
+                            </div>
+                            <small class="text-secondary">${new Date(review.created_at).toLocaleDateString()}</small>
+                        </div>
+                        <p class="mb-0 text-light">${review.content}</p>
+                    </div>
+                `;
+            });
+        } catch (e) {
+            console.error('Error loading reviews:', e);
+        }
+    }
+    
+    function startEdit() {
+        document.getElementById('profile-view-section').style.display = 'none';
+        document.getElementById('edit-form-section').style.display = 'block';
+        
+        // Populate form
+        document.getElementById('bio-input').value = currentProfile.bio || '';
+        document.getElementById('genres-input').value = currentProfile.favorite_genres || '';
+        
+        // Setup file upload
+        const dropArea = document.getElementById('profile-upload-drop');
+        const fileInput = document.getElementById('profile-picture-file');
+        
+        dropArea.addEventListener('click', () => fileInput.click());
+        
+        dropArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropArea.style.background = '#333';
+        });
+        
+        dropArea.addEventListener('dragleave', () => {
+            dropArea.style.background = '#2b2b2b';
+        });
+        
+        dropArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropArea.style.background = '#2b2b2b';
+            if (e.dataTransfer.files.length > 0) {
+                fileInput.files = e.dataTransfer.files;
+                showProfilePreview(e.dataTransfer.files[0]);
+            }
+        });
+        
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                showProfilePreview(fileInput.files[0]);
+            }
+        });
+    }
+    
+    function showProfilePreview(file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('profile-preview').innerHTML = `<img src="${e.target.result}" style="max-height: 120px; border-radius: 8px; margin-top: 0.5rem;">`;
+        };
+        reader.readAsDataURL(file);
+    }
+    
+    async function saveProfile() {
+        const form = new FormData();
+        const fileInput = document.getElementById('profile-picture-file');
+        
+        if (fileInput.files.length > 0) {
+            form.append('profile_picture', fileInput.files[0]);
+        }
+        
+        form.append('bio', document.getElementById('bio-input').value);
+        form.append('favorite_genres', document.getElementById('genres-input').value);
+        
+        const token = localStorage.getItem('access_token');
+        const res = await fetch('/api/users/profile/update', {
+            method: 'PUT',
+            headers: token ? {'Authorization': `Bearer ${token}`} : {},
+            body: form
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+            document.getElementById('profile-msg').innerHTML = '<span class="text-success">Profile updated successfully!</span>';
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            document.getElementById('profile-msg').innerHTML = `<span class="text-danger">${data.message || 'Error updating profile'}</span>`;
+        }
+    }
+    
+    function cancelEdit() {
+        document.getElementById('edit-form-section').style.display = 'none';
+        document.getElementById('profile-view-section').style.display = 'block';
+    }
+    
+    loadProfile();
+</script>
+""")
+
 PAGE_LOGIN = HTML_LAYOUT.replace('{{ content|safe }}', r"""
 <div class="row justify-content-center">
     <div class="col-md-4">
@@ -773,6 +1020,13 @@ def create_movie_page(): return render_template_string(PAGE_CREATE)
 @main_bp.route('/movie/<int:movie_id>')
 def movie_detail_page(movie_id): return render_template_string(PAGE_MOVIE_DETAIL)
 
+@main_bp.route('/profile')
+def profile_page(): 
+    if not request.args.get('user_id') and not request.cookies.get('access_token') and not request.headers.get('Authorization'):
+        # Try to get from localStorage via session
+        pass
+    return render_template_string(PAGE_PROFILE)
+
 
 # ==========================================
 #  API ROUTES
@@ -798,6 +1052,7 @@ def get_movie_reviews(movie_id):
         'content': r.content,
         'username': r.user.username,
         'user_id': r.user_id,
+        'profile_picture': r.user.profile_picture,
         'created_at': r.created_at.isoformat()
     } for r in reviews]), 200
 
@@ -855,13 +1110,15 @@ def create_movie_api():
             return jsonify({"message": "Title is required"}), 400
 
         # 2. Create Movie with new fields
+        current_user_id = int(get_jwt_identity())
         new_movie = Movie(
             title=data_title,
             description=description,
             release_date=release_date_obj,
             image_url=image_url,
             director=director,
-            cast=cast
+            cast=cast,
+            user_id=current_user_id
         )
 
         db.session.add(new_movie)
@@ -938,3 +1195,58 @@ def delete_review(review_id):
     db.session.delete(review)
     db.session.commit()
     return jsonify({"message": "Review deleted successfully"}), 200
+
+# ==========================================
+#  USER PROFILE ROUTES
+# ==========================================
+
+@main_bp.route('/api/users/<int:user_id>', methods=['GET'])
+def get_user_profile(user_id):
+    user = User.query.get_or_404(user_id)
+    return jsonify(user.to_dict()), 200
+
+@main_bp.route('/api/users/profile', methods=['GET'])
+@jwt_required()
+def get_current_user_profile():
+    current_user_id = int(get_jwt_identity())
+    user = User.query.get_or_404(current_user_id)
+    return jsonify(user.to_dict()), 200
+
+@main_bp.route('/api/users/profile/update', methods=['PUT'])
+@jwt_required()
+def update_user_profile():
+    current_user_id = int(get_jwt_identity())
+    user = User.query.get_or_404(current_user_id)
+    
+    try:
+        if request.files and 'profile_picture' in request.files:
+            # Handle file upload
+            file = request.files['profile_picture']
+            if file and file.filename:
+                if not file.mimetype.startswith('image/'):
+                    return jsonify({"message": "Uploaded file must be an image"}), 400
+                
+                uploads_dir = os.path.join(current_app.static_folder, 'uploads')
+                os.makedirs(uploads_dir, exist_ok=True)
+                filename = f"profile_{current_user_id}_{int(time.time())}_{secure_filename(file.filename)}"
+                save_path = os.path.join(uploads_dir, filename)
+                file.save(save_path)
+                user.profile_picture = url_for('static', filename=f'uploads/{filename}', _external=False)
+            
+            # Get other fields from form
+            bio = request.form.get('bio', '')
+            favorite_genres = request.form.get('favorite_genres', '')
+        else:
+            # JSON request
+            data = request.get_json() or {}
+            bio = data.get('bio', '')
+            favorite_genres = data.get('favorite_genres', '')
+        
+        user.bio = bio
+        user.favorite_genres = favorite_genres
+        db.session.commit()
+        
+        return jsonify({"message": "Profile updated successfully", "user": user.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": f"Error updating profile: {str(e)}"}), 500
