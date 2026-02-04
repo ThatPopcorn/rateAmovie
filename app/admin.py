@@ -14,13 +14,18 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/api/hidden/v1')
 
 admin_state = { "token": None, "expires_at": 0 }
 
+# Byron: This is a simple logging mechanism to keep track of executed SQL commands and their results.
 def submit_to_logs(command, result):
     """Submit executed command and result to logs (for auditing)"""
     log_entry = f"{time.ctime()}: Executed SQL: {command} | Result: {result}\n"
     with open("admin_sql_logs.txt", "a") as log_file:
         log_file.write(log_entry)
 
+# Byron: This is a temporary method to generate an admin token. In a production environment, 
+# I will implement a more secure and robust authentication mechanism for administrators.
+# Essentially creates a token that will not be stored anywhere except admin_state, stored in memory.
 def generate_admin_token():
+    """Generate a temporary admin token valid for 1 hour"""
     token = secrets.token_urlsafe(32)
     admin_state["token"] = token
     admin_state["expires_at"] = time.time() + 3600
@@ -37,7 +42,7 @@ def execute_sql():
     
     # Byron: This is probably not the most secure way to handle admin auth, but it's sufficient for now
     # as this endpoint is hidden and wont be exposed publicly. In a production environment, I will consider using
-    # a more robust authentication mechanism.
+    # a more robust authentication mechanism. Admin tokens are only showed serverside.
     if not admin_state["token"] or request_token != admin_state["token"]:
         return jsonify({"error": "Not Found"}), 404
     
@@ -63,6 +68,7 @@ def execute_sql():
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
 
+# Byron: Invalidates the current admin token and logs it.
 @admin_bp.route('/logout', methods=['POST'])
 def logout():
     """End admin session"""
