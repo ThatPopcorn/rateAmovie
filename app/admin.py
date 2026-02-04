@@ -1,6 +1,7 @@
 # app/admin.py
 import secrets
 import time
+import os
 from flask import Blueprint, request, jsonify
 from sqlalchemy import text
 from .extensions import db
@@ -12,6 +13,12 @@ from .extensions import db
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/hidden/v1')
 
 admin_state = { "token": None, "expires_at": 0 }
+
+def submit_to_logs(command, result):
+    """Submit executed command and result to logs (for auditing)"""
+    log_entry = f"{time.ctime()}: Executed SQL: {command} | Result: {result}\n"
+    with open("admin_sql_logs.txt", "a") as log_file:
+        log_file.write(log_entry)
 
 def generate_admin_token():
     token = secrets.token_urlsafe(32)
@@ -46,9 +53,11 @@ def execute_sql():
         if sql_command.upper().startswith("SELECT"):
             keys = result.keys()
             data = [dict(zip(keys, row)) for row in result]
+            submit_to_logs(sql_command, data)
             return jsonify({"status": "success", "data": data})
         else:
             db.session.commit()
+            submit_to_logs(sql_command, "Executed without SELECT")
             return jsonify({"status": "success", "message": "Executed."})
     except Exception as e:
         db.session.rollback()
@@ -60,4 +69,5 @@ def logout():
     global admin_state
     admin_state["token"] = None
     admin_state["expires_at"] = 0
+    submit_to_logs("Admin Logout", "Admin session ended")
     return jsonify({"status": "success", "message": "Logged out"}), 200
