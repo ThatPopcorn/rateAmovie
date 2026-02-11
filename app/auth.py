@@ -73,3 +73,4 @@ def logout():
     db.session.commit()
     
     return jsonify({"message": "Successfully logged out"}), 200
+    

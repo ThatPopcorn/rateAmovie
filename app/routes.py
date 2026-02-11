@@ -93,8 +93,10 @@ HTML_LAYOUT = r"""
             
             const res = await fetch(url, { ...options, headers });
             if (res.status === 401) {
-                alert('Session expired. Please login again.');
-                logout();
+                // Don't show alert - just silently logout and redirect
+                localStorage.clear();
+                window.location.href = '/login';
+                return res; // Return response before redirect completes
             }
             return res;
         }
@@ -152,8 +154,33 @@ HTML_LAYOUT = r"""
             return stars;
         }
 
+        // --- Token Validation ---
+        async function validateToken() {
+            if (!isLoggedIn()) return true;
+            
+            try {
+                const res = await authFetch('/api/auth/validate');
+                if (!res.ok) {
+                    // Token is invalid, clear everything and DON'T show alert
+                    // (prevents annoying alert on every page load after server restart)
+                    localStorage.clear();
+                    // Silently reload to show logged-out state
+                    if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+                        window.location.reload();
+                    }
+                    return false;
+                }
+                return true;
+            } catch (e) {
+                // Network error - don't logout, might just be temporary
+                console.error('Token validation failed:', e);
+                return true;
+            }
+        }
+
         // --- Navbar Updates ---
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            await validateToken();
             const nav = document.getElementById('nav-actions');
             if (isLoggedIn()) {
                 const user = localStorage.getItem('username');
@@ -170,7 +197,7 @@ HTML_LAYOUT = r"""
                     <a href="/register" class="btn btn-warning btn-sm">Register</a>
                 `;
             }
-        });
+        })();
     </script>
 </body>
 </html>
@@ -390,6 +417,27 @@ PAGE_MOVIE_DETAIL = HTML_LAYOUT.replace('{{ content|safe }}', r"""
 </div>
 
 <script>
+    // Validate token before allowing access to protected page
+    (async function() {
+        if (!isLoggedIn()) {
+            window.location.href = '/login';
+            return;
+        }
+        
+        // Quick token check
+        try {
+            const res = await fetch('/api/auth/validate', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+            });
+            if (!res.ok) {
+                localStorage.clear();
+                window.location.href = '/login';
+                return;
+            }
+        } catch(e) {
+            // Network error - allow page to load, authFetch will handle it
+        }
+    })();
     const movieId = window.location.pathname.split('/')[2];
     let ratingWidget = null;
     
@@ -657,7 +705,7 @@ PAGE_CREATE = HTML_LAYOUT.replace('{{ content|safe }}', r"""
                 <div class="col-md-6">
                     <label class="mb-1 fw-bold">Poster Image (drag & drop or paste link)</label>
                     <div id="drop-area" class="form-control mb-2" style="height:120px; display:flex; align-items:center; justify-content:center; text-align:center;">
-                        <div id="drop-message">Drag an image file here, paste an image link, or <a href="#" id="choose-file">choose a file</a></div>
+                        <div id="drop-message">Drag an image file here, paste an image link, or <a href="#" id="choose-file">choose a file</a> (5MB file limit)</div>
                     </div>
                     <input type="file" id="image-file" accept="image/*" style="display:none">
                     <input type="url" id="image" class="form-control mb-3" placeholder="Or enter an image URL (optional)">
@@ -677,6 +725,27 @@ PAGE_CREATE = HTML_LAYOUT.replace('{{ content|safe }}', r"""
     </div>
 </div>
 <script>
+    // Validate token before allowing access to protected page
+    (async function() {
+        if (!isLoggedIn()) {
+            window.location.href = '/login';
+            return;
+        }
+        
+        // Quick token check
+        try {
+            const res = await fetch('/api/auth/validate', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+            });
+            if (!res.ok) {
+                localStorage.clear();
+                window.location.href = '/login';
+                return;
+            }
+        } catch(e) {
+            // Network error - allow page to load, authFetch will handle it
+        }
+    })();
     async function submitMovie() {
         const payload = {
             title: document.getElementById('title').value.trim(),
@@ -872,6 +941,27 @@ PAGE_PROFILE = HTML_LAYOUT.replace('{{ content|safe }}', r"""
 </div>
 
 <script>
+    // Validate token before allowing access to protected page
+    (async function() {
+        if (!isLoggedIn()) {
+            window.location.href = '/login';
+            return;
+        }
+        
+        // Quick token check
+        try {
+            const res = await fetch('/api/auth/validate', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+            });
+            if (!res.ok) {
+                localStorage.clear();
+                window.location.href = '/login';
+                return;
+            }
+        } catch(e) {
+            // Network error - allow page to load, authFetch will handle it
+        }
+    })();
     const currentUserId = localStorage.getItem('user_id');
     const profileUserId = new URLSearchParams(window.location.search).get('user_id') || currentUserId;
     let currentProfile = null;
@@ -1337,6 +1427,10 @@ def get_current_user_profile():
     user = User.query.get_or_404(current_user_id)
     return jsonify(user.to_dict()), 200
 
+# Byron: The file input doesnt currently protect the server from maliciously sized
+#        files or non-image files. This can go very in-depth so for now it will be 
+#        a simple file uploa with size check of 5MB.
+
 @main_bp.route('/api/users/profile/update', methods=['PUT'])
 @jwt_required()
 def update_user_profile():
@@ -1350,6 +1444,13 @@ def update_user_profile():
             if file and file.filename:
                 if not file.mimetype.startswith('image/'):
                     return jsonify({"message": "Uploaded file must be an image"}), 400
+                
+                # test file size (5MB max)
+                file.seek(0, os.SEEK_END)
+                file_length = file.tell()
+                file.seek(0)
+                if file_length > 5 * 1024 * 1024:
+                    return jsonify({"message": "File size exceeds 5MB limit"}), 400
                 
                 uploads_dir = os.path.join(current_app.static_folder, 'uploads')
                 os.makedirs(uploads_dir, exist_ok=True)
@@ -1450,3 +1551,17 @@ def get_review_votes(review_id):
         }), 200
     except Exception as e:
         return jsonify({"message": f"Error fetching votes: {str(e)}"}), 500
+
+@main_bp.route('/api/auth/validate', methods=['GET'])
+@jwt_required()
+def validate_token():
+    """Validate that the current JWT token is still valid"""
+    try:
+        current_user = get_jwt_identity()
+        # Check if user still exists in database
+        user = User.query.filter_by(id=current_user).first()
+        if not user:
+            return jsonify({"message": "User not found"}), 401
+        return jsonify({"valid": True, "user_id": user.id}), 200
+    except Exception as e:
+        return jsonify({"message": "Invalid token"}), 401
